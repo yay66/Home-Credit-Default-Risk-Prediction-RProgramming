@@ -1,0 +1,515 @@
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(ggplot2, kableExtra, tidyverse, dplyr, stringr, caret, pROC, 
+               kernlab, gridExtra, scales, reshape2, skimr, e1071, caTools, 
+               mboost, gbm, LiblineaR, DataExplorer, GGally, plotly, viridis, 
+               caret, DT, data.table, lightgbm, skimr, knitr, corrplot, mlr, 
+               randomForest,extrafont, naivebayes, mlbench, rpart, class, pROC)
+
+```
+
+# IMPORT DATASET
+```{r}
+train <- read.csv('application_train.csv')
+train <- data.frame(train)
+train
+```
+
+# READ DATESET
+```{r}
+cat("application_train : (" , nrow(train) , "," , ncol(train) , ")\n")
+#The training data has 307511 observations (each one a separate loan) and 122 features (variables) including the TARGET (the label we want to predict).
+```
+### Target distribution
+```{r}
+train  %>% count(TARGET)
+```
+
+
+# CHECK MISSING VALUES
+```{r}
+a=colnames(train)
+b=colSums(is.na(train))  %>% as.data.table
+
+missing_value_table=cbind(a,b)
+
+colnames(missing_value_table)=c("variables","Missing_values")
+
+missing_value_table = missing_value_table  %>% filter(Missing_values>0)  %>% 
+                        mutate("% of Total Values" = round(100 * (Missing_values / nrow(train)),1))  %>% 
+                        arrange(desc(Missing_values))
+
+cat("All selected dataframe has" , ncol(train) , "columns.\n")
+cat("There are" , nrow(missing_value_table) , "columns that have missing values.")
+```
+
+### Check missing values - overall before any feature engineering
+```{r}
+train %>% skim() %>% kable()
+plot_intro(train)
+ggsave("before_my_plot.png")
+
+```
+# Removing outside source variable
+```{r}
+remove_missing_value <- filter(missing_value_table, missing_value_table$`% of Total Values`>45)
+remove_missing_value
+
+removed_columns_missing_values <- train[ , !names(train) %in% c(remove_missing_value$variables)]
+removed_columns_missing_values
+
+outsource = select(removed_columns_missing_values, FLAG_EMP_PHONE,FLAG_WORK_PHONE,FLAG_CONT_MOBILE,FLAG_PHONE,FLAG_EMAIL,REG_REGION_NOT_LIVE_REGION, REG_REGION_NOT_WORK_REGION, LIVE_REGION_NOT_WORK_REGION,REG_CITY_NOT_LIVE_CITY,REG_CITY_NOT_WORK_CITY, LIVE_CITY_NOT_WORK_CITY,EXT_SOURCE_2, EXT_SOURCE_3, FONDKAPREMONT_MODE, HOUSETYPE_MODE, WALLSMATERIAL_MODE, EMERGENCYSTATE_MODE, OBS_30_CNT_SOCIAL_CIRCLE, DEF_30_CNT_SOCIAL_CIRCLE,OBS_60_CNT_SOCIAL_CIRCLE,DEF_60_CNT_SOCIAL_CIRCLE,DAYS_LAST_PHONE_CHANGE,FLAG_DOCUMENT_2,FLAG_DOCUMENT_3,FLAG_DOCUMENT_4,FLAG_DOCUMENT_5,FLAG_DOCUMENT_6,FLAG_DOCUMENT_7,FLAG_DOCUMENT_8,FLAG_DOCUMENT_9,FLAG_DOCUMENT_10, FLAG_DOCUMENT_11, FLAG_DOCUMENT_11,FLAG_DOCUMENT_12,FLAG_DOCUMENT_13,FLAG_DOCUMENT_14,FLAG_DOCUMENT_15,FLAG_DOCUMENT_16,FLAG_DOCUMENT_17,FLAG_DOCUMENT_18,FLAG_DOCUMENT_19,FLAG_DOCUMENT_20,FLAG_DOCUMENT_21,AMT_REQ_CREDIT_BUREAU_HOUR,AMT_REQ_CREDIT_BUREAU_DAY,AMT_REQ_CREDIT_BUREAU_WEEK,AMT_REQ_CREDIT_BUREAU_MON,AMT_REQ_CREDIT_BUREAU_QRT,AMT_REQ_CREDIT_BUREAU_YEAR)
+
+outsource
+data = select(removed_columns_missing_values, -one_of(colnames(outsource)))
+data
+```
+
+
+### checking missing values
+```{r}
+data %>% skim() %>% kable()
+```
+
+### Checking again
+```{r}
+plot_intro(data)
+```
+
+### Adding new 9 features
+```{r}
+data
+
+data <- mutate(data, DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED == 365243, NA, DAYS_EMPLOYED),
+         DAYS_EMPLOYED_PERC = sqrt(DAYS_EMPLOYED / DAYS_BIRTH),
+         INCOME_CREDIT_PERC = AMT_INCOME_TOTAL / AMT_CREDIT,
+         INCOME_PER_PERSON = log1p(AMT_INCOME_TOTAL / CNT_FAM_MEMBERS),
+         ANNUITY_INCOME_PERC = sqrt(AMT_ANNUITY / (1 + AMT_INCOME_TOTAL)),
+         LOAN_INCOME_RATIO = AMT_CREDIT / AMT_INCOME_TOTAL,
+         ANNUITY_LENGTH = AMT_CREDIT / AMT_ANNUITY,
+         CHILDREN_RATIO = CNT_CHILDREN / CNT_FAM_MEMBERS, 
+         CREDIT_TO_GOODS_RATIO = AMT_CREDIT / AMT_GOODS_PRICE,
+         INC_PER_CHLD = AMT_INCOME_TOTAL / (1 + CNT_CHILDREN),)
+
+data
+# add new 9 features into dataset, now the dataset have 38 features in total. (29+9) In addtion, complete rows is 100%.
+#DAYS_EMPLOYED_PERC: The percentage of the client's lifespan (measured in days) that they have been employed for.客户的寿命（以天数计算）中，他们被雇用的百分比
+
+# INCOME_CREDIT_PERC: The ratio of the client's income to the amount of credit they are applying for客户的收入与他们所申请的信贷额度的比率
+
+# INCOME_PER_PERSON: The natural logarithm of the client's income divided by the number of family members. 客户的收入除以家庭成员数量的自然对数。
+
+# ANNUITY_INCOME_PERC: The ratio of the client's income to their monthly annuity payment.客户的收入与他们每月年金支付的比率。
+
+# LOAN_INCOME_RATIO: The ratio of the amount of credit the client is applying for to their income. 客户申请的信贷金额与他们的收入的比率。
+
+# ANNUITY_LENGTH: The length of the client's annuity payment, measured in months.客户的年金支付的长度，以月为单位。
+
+# CHILDREN_RATIO: The ratio of the number of children the client has to the number of family members. 客户拥有的子女数量与家庭成员数量的比率。
+
+# CREDIT_TO_GOODS_RATIO: The ratio of the amount of credit the client is applying for to the price of the goods they are purchasing with the credit. 客户申请的信贷金额与他们用信贷购买的商品价格的比率。
+
+# INC_PER_CHLD: The client's income divided by the number of children they have plus 1客户的收入除以他们所拥有的子女数量加1
+
+# add new 9 features into dataset, now the dataset have 38 features in total. (29+9) 
+```
+
+# Before handling outlier values
+```{r}
+before_handling_outlier <- data[, c("DAYS_BIRTH", "DAYS_EMPLOYED", "DAYS_REGISTRATION", "DAYS_ID_PUBLISH")]
+before_handling_outlier
+```
+
+# Handling the outlier values & transform the data
+```{r}
+### Convert DAYS_BIRTH and DAYS_EMPLOYED to whole number and change the DAYS_BIRTH column to AGE.
+convert_age <- function(age_days_negative) {
+  age_days_positive <- -age_days_negative
+  age_years <- age_days_positive/365
+  age_years_rounded <- round(age_years)
+  return(age_years_rounded)
+}
+
+# Apply the function to DAYS_BIRTH and DAYS_EMPLOYED columns in the data frame
+colnames(data)[which(names(data) == "DAYS_BIRTH")] <- "AGE"
+data$AGE <- sapply(data$AGE, convert_age)
+data$DAYS_EMPLOYED <- sapply(data$DAYS_EMPLOYED, convert_age)
+data$DAYS_REGISTRATION <- sapply(data$DAYS_REGISTRATION, convert_age)
+data$DAYS_ID_PUBLISH <- sapply(data$DAYS_ID_PUBLISH, convert_age)
+```
+
+# After handling outlier values
+```{r}
+after_handling_outlier <- data[, c("AGE", "DAYS_EMPLOYED", "DAYS_REGISTRATION", "DAYS_ID_PUBLISH")]
+after_handling_outlier
+```
+#check missing value again
+```{r}
+col_miss <- colSums(is.na(data))
+
+# Count total missing values
+total_miss <- sum(col_miss)
+
+# Count number of rows with missing values
+row_miss <- sum(rowSums(is.na(data)) > 0)
+
+# Print results
+cat("Missing values per column:\n")
+print(col_miss)
+cat("Total number of missing values:", total_miss, "\n")
+cat("Number of rows with missing values:", row_miss, "\n")
+```
+
+#fill the NA value with median imputation and check if there is any missing value again
+```{r}
+data <- data %>% 
+  mutate_all(~ifelse(is.na(.), median(., na.rm = TRUE), .))
+col_miss <- colSums(is.na(data))
+
+# Count total missing values
+total_miss <- sum(col_miss)
+
+# Count number of rows with missing values
+row_miss <- sum(rowSums(is.na(data)) > 0)
+
+# Print results
+cat("Missing values per column:\n")
+print(col_miss)
+cat("Total number of missing values:", total_miss, "\n")
+cat("Number of rows with missing values:", row_miss, "\n")
+```
+
+
+```{r}
+# Replace missing values with the most frequent value in each column
+# data <- data %>% 
+#   mutate_all(~ifelse(is.na(.), names(which.max(table(na.omit(.)))), .))
+# data <- na.omit(data)
+table(data$TARGET)
+```
+
+# Final checking data
+```{r}
+data
+
+data %>% skim() %>% kable()
+plot_intro(data)
+ggsave("after_my_plot.png")
+```
+
+
+### DATA EXPLORATION
+## Heatmap for all features
+
+```{r}
+sapply(data, class)
+
+library(dplyr)
+
+selected_vars <- setdiff(colnames(data), c("SK_ID_CURR"))
+
+# Create a new dataframe with TARGET as the first column and all other columns as the rest of the columns
+heatmap_data <- select(data, TARGET, selected_vars)
+heatmap_data
+
+# Heatmap - transform non-numeric var to numeric
+data_numeric <- heatmap_data %>% mutate_if(is.character, as.numeric)
+
+corr_matrix <- cor(data_numeric)
+
+corr_df <- as.data.frame(as.table(corr_matrix))
+names(corr_df) <- c("Variable 1", "Variable 2", "Correlation")
+
+ggplot(data = corr_df, aes(x = `Variable 1`, y = `Variable 2`, fill = Correlation)) +
+  geom_tile(color = "black") +
+  coord_fixed() +
+  guides(fill = guide_colourbar(barwidth = 0.5,barheight = 10))+ 
+  theme(axis.text.x = element_text(size = 5, angle = 90), 
+        axis.text.y = element_text(size = 5), 
+        plot.title = element_text(size = 10), 
+        plot.background = element_rect(size = 2, fill = "white")) +
+  labs(title = "Correlation Heatmap with TARGET", x = "", y = "")
+
+```
+
+
+
+## Distribution of Single variable
+# Distribution of target variable
+```{r}
+ggplot(data,aes(TARGET))+
+    geom_bar(fill = "purple",alpha=0.3)+
+    geom_text(aes(label =scales::percent(..count../sum(..count..))),stat = 'count',vjust = -0.5)+
+    scale_y_continuous(label = comma)
+
+# From this information, we see this is an imbalanced class problem. There are far more loans that were repaid on time than loans that were not repaid. Once we get into more sophisticated machine learning models, we can Threshold adjustment & XGBoosting by their representation in the data to reflect this imbalance.
+```
+
+# Types of loan
+```{r}
+data %>% group_by(NAME_CONTRACT_TYPE) %>%
+    count() %>% 
+    plot_ly(type = "pie", labels =~ NAME_CONTRACT_TYPE,values = ~n,textposition="indside",textinfo='label+percent',hole = 0.7,showlegend=TRUE) %>% 
+    layout(title="NAME_CONTRACT_TYPE")
+# Most of the loans are Cash loans which were taken by applicants. 90.5 % loans are Cash loans.
+```
+
+# Purpose of loan
+```{r}
+data %>% group_by(FLAG_OWN_CAR) %>%
+    count() %>%  plot_ly( labels = ~FLAG_OWN_CAR, values=~n, type = 'pie',hole = 0.7,
+        marker = list(color = 'rgb(000,051,255)',
+                                  width = 1.5)) %>%
+    layout(title = "FLAG_OWN_CAR client" )
+```
+
+```{r}
+data %>% group_by(FLAG_OWN_REALTY) %>%
+    count() %>%  plot_ly( labels = ~FLAG_OWN_REALTY,values=~n, type = 'pie',hole = 0.7,
+        marker = list(color = 'rgb(000,051,255)',width = 1.5)) %>%
+    layout(title = "FLAG_OWN_REALTY client")
+```
+
+# Family Status of Applicant's who applied for loan
+```{r}
+data %>%
+  group_by(NAME_FAMILY_STATUS) %>%
+  count() %>%
+  plot_ly(
+    labels = ~ NAME_FAMILY_STATUS,
+    values = ~ n,
+    type = 'pie',
+    hole = 0.5,
+    textposition = "inside",
+    textinfo = 'percent',
+    marker = list(width = 1.5)
+  ) %>%
+  layout(title = "FAMILY_STATUS of Applicant's client ")
+#63.9 % applicants are married. 14.8 % are single etc.
+```
+
+# Income sources of Applicants' who applied for loan
+```{r}
+data %>%
+  group_by(NAME_INCOME_TYPE) %>%
+  count() %>%
+  plot_ly(
+    labels = ~ NAME_INCOME_TYPE,
+    values = ~ n,
+    type = 'pie',
+    hole = 0.5,
+    textposition = "inside",
+    textinfo = 'percent',
+    marker = list(width = 1.5)
+  ) %>%
+  layout(title = "Income sources of Applicant's client ")
+
+# 51.6 % Applicants mentioned that they are working. 23.3 % are Commercial Associate and 18 % are Pensioner etc.
+```
+
+# Occupation of Applicant’s who applied for loan
+```{r}
+data %>%
+  group_by(OCCUPATION_TYPE) %>%
+  count() %>%
+  plot_ly(
+    x = ~OCCUPATION_TYPE,
+    y = ~n,
+    type = 'bar',
+    showlegend = TRUE,
+    text = ~n,
+    textposition = "inside",
+    marker = list(color = 'rgb(0, 204,51)',
+                  width = 1.5)
+  ) %>%
+  layout(
+    title = "Occupation of Applicant's who applied for loan",
+    xaxis = list(title = "Occupation"),
+    yaxis = list(title = "Count")
+  )
+
+# Top Applicant's who applied for loan :
+# Laborers - Apprx. 55 K
+# Sales Staff - Approx. 32 K
+# Core staff - Approx. 28 K
+# Managers - Approx. 21 K
+# Drivers - Approx. 19 K
+```
+
+# Education of Applicant’s who applied for loan
+```{r}
+data %>% group_by(NAME_EDUCATION_TYPE) %>%
+  count() %>%  plot_ly(
+    labels = ~NAME_EDUCATION_TYPE,
+    values = ~n,
+    type = 'pie',
+    hole = 0.5,
+    textposition = "inside",
+    textinfo = 'percent',
+    marker = list(width = 1.5)
+  ) %>%
+  layout(title = "EDUCATION_TYPE of Applicant's client")
+
+# 71 % applicants have secondary and 24.3 % having higher education.
+```
+
+# For which types of house higher applicant's applied for loan ?
+```{r}
+data %>% group_by(NAME_HOUSING_TYPE) %>%
+  count() %>%  plot_ly(
+    labels = ~NAME_HOUSING_TYPE,
+    values = ~n,
+    type = 'pie',
+    hole = 0.5,
+    textposition = "inside",
+    textinfo = 'percent',
+    marker = list(width = 1.5)
+  ) %>%
+  layout(title = "Type of House(living) ")
+
+
+# Approx. 89 % peoples applied for loan, they mentioned type of house is House / Appartment.
+```
+
+# Types of Organizations who applied for loan
+```{r}
+dt <- data %>% group_by(ORGANIZATION_TYPE) %>% count() %>% arrange(desc(n))
+names <- dt %>% unique()
+
+plot_ly(data = dt, x = ~ORGANIZATION_TYPE, y = ~ n, type = 'bar', showlegend=TRUE,
+        marker = list(color = 'rgb(0, 204,51)', width = 1.5), text = ~n) %>%
+    layout(title = "Types of Organizations who applied for loan ",
+         xaxis = list(title = "Organization",categoryarray = names, categoryorder = "array"),
+         yaxis = list(title = "Count")) 
+
+
+# Types of Organizations who applied for loan :
+# Business Entity Type 3 - Approx. 68 K
+# XNA - Approx. 55 K
+# Self employed - Approx. 38 K
+# Others - Approx. 17 K
+# Medicine - Approx. 11 K
+```
+
+## Exploration in terms of loan is repayed or not
+# Effect of the Income sources on repayment
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(NAME_INCOME_TYPE, TARGET) %>% 
+  plot_ly(x = ~NAME_INCOME_TYPE , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "NAME_INCOME Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Effect of Family Status on repayment
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(NAME_FAMILY_STATUS, TARGET) %>% 
+  plot_ly(x = ~NAME_FAMILY_STATUS , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "FAMILY_STATUS Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Effect of the Occupation on repayment
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(OCCUPATION_TYPE, TARGET) %>% 
+  plot_ly(x = ~OCCUPATION_TYPE , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "Occupation Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Effect of the Education on repayment
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(NAME_EDUCATION_TYPE, TARGET) %>% 
+  plot_ly(x = ~NAME_EDUCATION_TYPE , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "Education Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Effect of the housing types on repayment
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(NAME_HOUSING_TYPE, TARGET) %>% 
+  plot_ly(x = ~NAME_HOUSING_TYPE , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "HOUSING Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Effect of the Organzations types on repayment
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(ORGANIZATION_TYPE, TARGET) %>% 
+  plot_ly(x = ~ORGANIZATION_TYPE , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "ORGANIZATION Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Distribution of Name of type of the Suite in terms of loan is repayed or not
+```{r}
+data %>% 
+  mutate(TARGET=as.factor(TARGET)) %>% 
+  count(NAME_TYPE_SUITE, TARGET) %>% 
+  plot_ly(x = ~NAME_TYPE_SUITE , y = ~n, color = ~TARGET, type = "bar") %>%
+  layout(title = "NAME_SUITE Type Group",
+         barmode = 'group',
+         xaxis = list(title = ""),
+         yaxis = list(title = ""))
+```
+
+# Effect of the age on repayment
+# kernel density estimation plot (KDE) colored by the value of the target
+```{r}
+ggplot(data, aes(x = AGE, fill = factor(TARGET))) + 
+  geom_density(alpha = 0.6) + 
+  ggtitle("Age Distribution") +
+  labs(x = "Age") +
+  scale_fill_discrete(name = "Target", labels = c("0", "1")) +
+  theme_bw()
+# result: The target == 1 curve skews towards the younger end of the range.
+```
+
+# Average failure to repay loans by age bracket
+
+```{r}
+# To make this graph, first we cut the age category into bins of 5 years each. Then, for each bin, we calculate the average value of the target, which tells us the ratio of loans that were not repaid in each age category.
+
+data_age <- data %>%
+  select('TARGET', 'AGE')
+
+# Bin the age data
+data_age[,'YEARS_BINNED'] = cut(data_age[,'AGE'], breaks = seq(20,70,by=5))
+head(data_age,10)
+
+# Group by the bin and calculate averages
+data_age  %>% group_by(YEARS_BINNED)  %>% summarise_all(mean)
+
+data_age  %>% group_by(YEARS_BINNED)  %>% summarise_all(mean)  %>% 
+    ggplot(aes(x=YEARS_BINNED, y=TARGET*100))+
+        geom_col(fill = "purple",alpha=0.3)+
+        labs(title = "Failure to Repay by Age Group", x = "Age Group (years)", y= 'Failure to Repay (%)')+
+        theme(plot.title = element_text(hjust = .5))
+
+# result: Clear trend - youngers applicants are more likely to not repay the loan.The rate of failure to repay is above 10% for the youngest three age groups and beolow 5% for the oldest age group. Bank maybe should be provided younger people with more guidance or financial planning tips to help them pay on time..
+
+```
+

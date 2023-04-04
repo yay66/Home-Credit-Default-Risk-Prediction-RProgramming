@@ -1,0 +1,455 @@
+
+```{r}
+# install.packages('dplyr')
+# install.packages('caret')
+# install.packages('ggplot2')
+# install.packages('pROC')
+# install.packages('kernlab') # a library for SVM
+# install.packages('e1071') # a library for SVM
+# install.packages('adabag') # a library for bagged adaboost
+# install.packages('caTools') # a library for boosted logistic regression
+# install.packages('mboost') # a library for boosted logistic regression
+# install.packages('gbm') # a library for stochastic gradient boosting
+# install.packages('LiblineaR') # a library for regularized logistic regression
+# 
+# install.packages('caret', dependencies = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(pROC)
+library(kernlab)
+library(e1071)
+library(caTools)
+library(mboost)
+library(gbm)
+library(LiblineaR)
+
+library(data.table)
+
+# library(tidyverse)
+# library(stringr)
+# library(kernlab)
+# library(gridExtra)
+# library(scales)
+# library(reshape2)
+# library(skimr)
+# library(e1071)
+# library(caTools)
+# library(mboost)
+# library(gbm)
+# library(LiblineaR)
+# library(DataExplorer)
+# library(GGally)
+# library(plotly)
+# library(viridis)
+# library(DT)
+# library(data.table)
+# library(lightgbm)
+# library(skimr)
+# library(knitr)
+# library(corrplot)
+# library(mlr)
+# library(randomForest)
+# library(extrafont)
+# library(naivebayes)
+# library(mlbench)
+# library(rpart)
+# library(class)
+```
+
+
+```{r}
+# if (!require("pacman")) install.packages("pacman")
+# pacman::p_load(ggplot2, tidyverse, dplyr, stringr, caret, pROC, kernlab,
+#                gridExtra, scales, reshape2, skimr, e1071, caTools, mboost, gbm,
+#                LiblineaR, DataExplorer, GGally, plotly, viridis,
+#                caret, DT, data.table, lightgbm, skimr, knitr, corrplot, mlr,
+#                randomForest,extrafont, naivebayes, mlbench, rpart, class, pROC)
+```
+
+
+```{r}
+train <- read.csv('application_train.csv')
+train <- data.frame(train)
+a=colnames(train)
+b=colSums(is.na(train)) %>% as.data.table
+
+missing_value_table=cbind(a,b)
+
+colnames(missing_value_table)=c("variables","Missing_values")
+
+missing_value_table = missing_value_table  %>% filter(Missing_values>0)  %>% 
+                        mutate("% of Total Values" = round(100 * (Missing_values / nrow(train)),1))  %>% 
+                        arrange(desc(Missing_values))
+
+cat("All selected dataframe has" , ncol(train) , "columns.\n")
+cat("There are" , nrow(missing_value_table) , "columns that have missing values.")
+
+
+remove_missing_value <- filter(missing_value_table, missing_value_table$`% of Total Values`>45)
+removed_columns_missing_values <- train[ , !names(train) %in% c(remove_missing_value$variables)]
+
+outsource = select(removed_columns_missing_values, FLAG_EMP_PHONE,FLAG_WORK_PHONE,FLAG_CONT_MOBILE,FLAG_PHONE,FLAG_EMAIL,REG_REGION_NOT_LIVE_REGION, REG_REGION_NOT_WORK_REGION, LIVE_REGION_NOT_WORK_REGION,REG_CITY_NOT_LIVE_CITY,REG_CITY_NOT_WORK_CITY, LIVE_CITY_NOT_WORK_CITY,EXT_SOURCE_2, EXT_SOURCE_3, FONDKAPREMONT_MODE, HOUSETYPE_MODE, WALLSMATERIAL_MODE, EMERGENCYSTATE_MODE, OBS_30_CNT_SOCIAL_CIRCLE, DEF_30_CNT_SOCIAL_CIRCLE,OBS_60_CNT_SOCIAL_CIRCLE,DEF_60_CNT_SOCIAL_CIRCLE,DAYS_LAST_PHONE_CHANGE,FLAG_DOCUMENT_2,FLAG_DOCUMENT_3,FLAG_DOCUMENT_4,FLAG_DOCUMENT_5,FLAG_DOCUMENT_6,FLAG_DOCUMENT_7,FLAG_DOCUMENT_8,FLAG_DOCUMENT_9,FLAG_DOCUMENT_10, FLAG_DOCUMENT_11, FLAG_DOCUMENT_11,FLAG_DOCUMENT_12,FLAG_DOCUMENT_13,FLAG_DOCUMENT_14,FLAG_DOCUMENT_15,FLAG_DOCUMENT_16,FLAG_DOCUMENT_17,FLAG_DOCUMENT_18,FLAG_DOCUMENT_19,FLAG_DOCUMENT_20,FLAG_DOCUMENT_21,AMT_REQ_CREDIT_BUREAU_HOUR,AMT_REQ_CREDIT_BUREAU_DAY,AMT_REQ_CREDIT_BUREAU_WEEK,AMT_REQ_CREDIT_BUREAU_MON,AMT_REQ_CREDIT_BUREAU_QRT,AMT_REQ_CREDIT_BUREAU_YEAR)
+
+data = select(removed_columns_missing_values, -one_of(colnames(outsource)))
+
+data <- mutate(data, DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED == 365243, NA, DAYS_EMPLOYED),
+         DAYS_EMPLOYED_PERC = sqrt(DAYS_EMPLOYED / DAYS_BIRTH),
+         INCOME_CREDIT_PERC = AMT_INCOME_TOTAL / AMT_CREDIT,
+         INCOME_PER_PERSON = log1p(AMT_INCOME_TOTAL / CNT_FAM_MEMBERS),
+         ANNUITY_INCOME_PERC = sqrt(AMT_ANNUITY / (1 + AMT_INCOME_TOTAL)),
+         LOAN_INCOME_RATIO = AMT_CREDIT / AMT_INCOME_TOTAL,
+         ANNUITY_LENGTH = AMT_CREDIT / AMT_ANNUITY,
+         CHILDREN_RATIO = CNT_CHILDREN / CNT_FAM_MEMBERS,
+         CREDIT_TO_GOODS_RATIO = AMT_CREDIT / AMT_GOODS_PRICE,
+         INC_PER_CHLD = AMT_INCOME_TOTAL / (1 + CNT_CHILDREN),)
+
+convert_age <- function(age_days_negative) {
+  age_days_positive <- -age_days_negative
+  age_years <- age_days_positive/365
+  age_years_rounded <- round(age_years)
+  return(age_years_rounded)
+}
+
+# Apply the function to DAYS_BIRTH and DAYS_EMPLOYED columns in the data frame
+colnames(data)[which(names(data) == "DAYS_BIRTH")] <- "AGE"
+data$AGE <- sapply(data$AGE, convert_age)
+data$DAYS_EMPLOYED <- sapply(data$DAYS_EMPLOYED, convert_age)
+data$DAYS_REGISTRATION <- sapply(data$DAYS_REGISTRATION, convert_age)
+data$DAYS_ID_PUBLISH <- sapply(data$DAYS_ID_PUBLISH, convert_age)
+
+data = data.frame(data)
+data
+```
+
+```{r}
+# install.packages("dummies")
+# cat_vars <- data[, c("NAME_CONTRACT_TYPE", "CODE_GENDER", "FLAG_OWN_CAR", "FLAG_OWN_REALTY", 
+#                      "NAME_TYPE_SUITE", "NAME_INCOME_TYPE", "NAME_EDUCATION_TYPE", 
+#                      "NAME_FAMILY_STATUS", "NAME_HOUSING_TYPE", "OCCUPATION_TYPE", 
+#                      "WEEKDAY_APPR_PROCESS_START", "ORGANIZATION_TYPE")]
+# 
+# # Create dummy variables
+# dummy_vars <- dummyVars("~.", data = cat_vars)
+# 
+# # Apply dummy variables to data
+# data_dummies <- as.data.frame(predict(dummy_vars, newdata = cat_vars))
+# 
+# # Remove original columns
+# data <- data[, !names(data) %in% names(cat_vars)]
+# data <- cbind(data, data_dummies)
+# data
+
+```
+
+#check missing value again
+```{r}
+col_miss <- colSums(is.na(data))
+
+# Count total missing values
+total_miss <- sum(col_miss)
+
+# Count number of rows with missing values
+row_miss <- sum(rowSums(is.na(data)) > 0)
+
+# Print results
+cat("Missing values per column:\n")
+print(col_miss)
+cat("Total number of missing values:", total_miss, "\n")
+cat("Number of rows with missing values:", row_miss, "\n")
+```
+#fill the NA value with median imputation and check if there is any missing value again
+```{r}
+data <- data %>% 
+  mutate_all(~ifelse(is.na(.), median(., na.rm = TRUE), .))
+col_miss <- colSums(is.na(data))
+
+# Count total missing values
+total_miss <- sum(col_miss)
+
+# Count number of rows with missing values
+row_miss <- sum(rowSums(is.na(data)) > 0)
+
+# Print results
+cat("Missing values per column:\n")
+print(col_miss)
+cat("Total number of missing values:", total_miss, "\n")
+cat("Number of rows with missing values:", row_miss, "\n")
+```
+
+
+```{r}
+# Replace missing values with the most frequent value in each column
+# data <- data %>% 
+#   mutate_all(~ifelse(is.na(.), names(which.max(table(na.omit(.)))), .))
+# data <- na.omit(data)
+table(data$TARGET)
+
+```
+
+```{r}
+# TARGET~ CNT_CHILDREN+AMT_INCOME_TOTAL+AMT_CREDIT+AMT_ANNUITY+AMT_GOODS_PRICE+REGION_POPULATION_RELATIVE+AGE+DAYS_REGISTRATION+DAYS_ID_PUBLISH + FLAG_MOBIL+ CNT_FAM_MEMBERS +  REGION_RATING_CLIENT+ HOUR_APPR_PROCESS_START+ REGION_RATING_CLIENT_W_CITY+ INCOME_CREDIT_PERC +INCOME_PER_PERSON +ANNUITY_INCOME_PERC+LOAN_INCOME_RATIO+ANNUITY_LENGTH+CHILDREN_RATIO+ CREDIT_TO_GOODS_RATIO+ INC_PER_CHLD
+```
+
+```{r}
+variables = c('CNT_CHILDREN','AMT_INCOME_TOTAL','AMT_CREDIT','AMT_ANNUITY','AMT_GOODS_PRICE','REGION_POPULATION_RELATIVE','AGE','DAYS_REGISTRATION','DAYS_ID_PUBLISH' , 'FLAG_MOBIL', 'CNT_FAM_MEMBERS' ,  'REGION_RATING_CLIENT', 'HOUR_APPR_PROCESS_START', 'REGION_RATING_CLIENT_W_CITY', 'INCOME_CREDIT_PERC' ,'INCOME_PER_PERSON' ,'ANNUITY_INCOME_PERC','LOAN_INCOME_RATIO','ANNUITY_LENGTH','CHILDREN_RATIO', 'CREDIT_TO_GOODS_RATIO', 'INC_PER_CHLD')
+```
+
+
+#Boosted Logistic Regression
+```{r}
+# data_1 = data
+# data_1$TARGET <- ifelse(data_1$TARGET == 1, "NO", "YES")
+# 
+# data_1[, 'TARGET'] = as.factor(data_1[, 'TARGET'])
+# levels(data_1$TARGET)
+# 
+# # explicity set reference (positive) class to 'yes' for target variable 'card'
+# data_1$TARGET <- relevel(data_1$TARGET, ref = 'YES')
+# levels(data_1$TARGET)
+# 
+# set.seed(100)
+# train <- createDataPartition(y = data_1$TARGET, p=0.7, list = FALSE)
+# training <- data_1[train,]
+# testing <- data_1[-train,]
+# 
+# logit_boost <- train(TARGET ~ AMT_INCOME_TOTAL + AMT_CREDIT + AMT_ANNUITY + AMT_GOODS_PRICE + REGION_POPULATION_RELATIVE + AGE, data = training, method = 'LogitBoost', prob.model = TRUE)
+# logit_boost
+# 
+# # Test model on test set
+# test_pred <- predict(logit_boost, newdata = testing)
+# confusionMatrix(test_pred, as.factor(testing$card), mode = 'everything')
+# 
+# # check counts of each class
+# testing %>% group_by(card) %>% count()
+# 
+# # get ROC curve
+# # get probability for 'yes' and 'no' for each data point
+# 
+# test_pred_prob <- predict(logit_boost, newdata = testing, type = 'prob')
+# logit_boost_roc <- roc(testing$card, test_pred_prob$yes)
+# 
+# # get area under curve (auc)
+# logit_boost_roc$auc
+# 
+# # get ROC curve
+# plot(logit_boost_roc)
+```
+
+
+
+#Stochastic Gradient Boosting 
+```{r}
+set.seed(100)
+
+# Split the data into training and testing sets
+train_index <- createDataPartition(data$TARGET, p = 0.7, list = FALSE)
+train <- data[train_index, ]
+test <- data[-train_index, ]
+
+# Check the number of rows and columns in training and testing sets
+dim(train)
+dim(test)
+
+# Check the summary of the target variable in training set
+summary(train$TARGET)
+
+# Adjust the threshold for classification to handle the imbalanced data
+train$TARGET_adjusted <- ifelse(train$TARGET == 1, 0.15, 0.85)
+
+# Check the summary of the adjusted target variable in training set
+summary(train$TARGET_adjusted)
+
+blm_model <- gbm(formula = TARGET_adjusted ~ ., data = train[, c(variables, "TARGET_adjusted")], distribution = "bernoulli", n.trees = 200, interaction.depth = 3, shrinkage = 0.1, bag.fraction = 0.5, train.fraction = 1, n.minobsinnode = 10)
+
+# Predict the probability of default for the test set
+pred <- predict(blm_model, newdata = test[, variables], n.trees = 200, type = "response")
+
+# Convert the predicted probabilities to binary class labels based on the adjusted threshold
+pred_class <- ifelse(pred > 0.15, 0, 1)
+
+# Compute the accuracy and AUC of the model on the test set
+
+conf_mat <- table(pred_class, test$TARGET)
+accuracy <- sum(diag(conf_mat))/sum(conf_mat)
+auc <- pROC::auc(test$TARGET, pred)
+
+# Print the results
+print(paste("Accuracy:", round(accuracy, 3)))
+print(paste("AUC:", round(auc, 3)))
+
+roc_obj <- roc(test$TARGET, pred)
+plot(roc_obj, main = "ROC Curve", print.thres = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+
+
+
+# Generate confusion matrix
+
+par(mar = c(5, 6, 4, 2))
+par(cex.axis = 0.5)
+par(cBars = 10, las = 2)
+
+# Print the summary of the model
+
+summary(blm_model)
+
+```
+```{r}
+# library(caret)
+# library(pROC)
+
+set.seed(100)
+
+# Split the data into training and testing sets
+train_idx <- createDataPartition(data$TARGET, p = 0.7, list = FALSE)
+train <- data[train_idx, ]
+test <- data[-train_idx, ]
+
+# Fit the logistic regression model on the training data
+logit_model <- glm(TARGET~ CNT_CHILDREN+AMT_INCOME_TOTAL+AMT_CREDIT+AMT_ANNUITY+AMT_GOODS_PRICE+REGION_POPULATION_RELATIVE+AGE+DAYS_REGISTRATION+DAYS_ID_PUBLISH + FLAG_MOBIL+ CNT_FAM_MEMBERS +  REGION_RATING_CLIENT+ HOUR_APPR_PROCESS_START+ REGION_RATING_CLIENT_W_CITY+ INCOME_CREDIT_PERC +INCOME_PER_PERSON +ANNUITY_INCOME_PERC+LOAN_INCOME_RATIO+ANNUITY_LENGTH+CHILDREN_RATIO+ CREDIT_TO_GOODS_RATIO+ INC_PER_CHLD, family = binomial(link = 'logit'), data = train)
+
+# Make predictions on the test data
+prob <- predict(logit_model, newdata = test, type = 'response')
+threshold <- 0.3 # Adjust the threshold for handling imbalanced data
+pred <- ifelse(prob > threshold, 1, 0)
+
+summary(logit_model)
+acc <- mean(pred == test$TARGET)
+auc <- roc(test$TARGET, prob)$auc
+
+conf_matrix <- confusionMatrix(table(pred, test$TARGET))
+
+# Print confusion matrix
+conf_matrix
+
+# Print F1 and recall
+f1 <- 2 * conf_matrix$byClass['Pos Pred Value'] * conf_matrix$byClass['Sensitivity'] / 
+  (conf_matrix$byClass['Pos Pred Value'] + conf_matrix$byClass['Sensitivity'])
+recall <- conf_matrix$byClass['Sensitivity']
+cat(sprintf("F1 score: %0.3f, Recall: %0.3f\n", f1, recall))
+
+cat("Accuracy: ", acc, "\n")
+cat("AUC: ", auc, "\n")
+
+```
+
+#Logistic Regression
+```{r}
+set.seed(100)
+train_idx <- sample(nrow(data), 0.7*nrow(data))
+train <- data[train_idx, ]
+test <- data[-train_idx, ]
+
+# Fit the logistic regression model on the training data
+logit_model <- glm(TARGET~ CNT_CHILDREN+AMT_INCOME_TOTAL+AMT_CREDIT+AMT_ANNUITY+AMT_GOODS_PRICE+REGION_POPULATION_RELATIVE+AGE+DAYS_REGISTRATION+DAYS_ID_PUBLISH + FLAG_MOBIL+ CNT_FAM_MEMBERS +  REGION_RATING_CLIENT+ HOUR_APPR_PROCESS_START+ REGION_RATING_CLIENT_W_CITY+ INCOME_CREDIT_PERC +INCOME_PER_PERSON +ANNUITY_INCOME_PERC+LOAN_INCOME_RATIO+ANNUITY_LENGTH+CHILDREN_RATIO+ CREDIT_TO_GOODS_RATIO+ INC_PER_CHLD, family = binomial(link = 'logit'), data = train)
+
+# Make predictions on the test data
+prob <- predict(logit_model, newdata = test, type = 'response')
+pred <- ifelse(prob > 0.5, 1, 0)
+
+# Calculate the accuracy and AUC
+summary(logit_model)
+acc <- mean(pred == test$TARGET)
+auc <- roc(test$TARGET, prob)$auc
+
+conf_matrix <- confusionMatrix(table(pred, test$TARGET))
+
+# Print confusion matrix
+conf_matrix
+
+# Print F1 and recall
+f1 <- 2 * conf_matrix$byClass['Pos Pred Value'] * conf_matrix$byClass['Sensitivity'] / 
+  (conf_matrix$byClass['Pos Pred Value'] + conf_matrix$byClass['Sensitivity'])
+recall <- conf_matrix$byClass['Sensitivity']
+cat(sprintf("F1 score: %0.3f, Recall: %0.3f\n", f1, recall))
+
+cat("Accuracy: ", acc, "\n")
+cat("AUC: ", auc, "\n")
+```
+```{r}
+set.seed(100)
+
+# Split the data into training and testing sets
+train_index <- createDataPartition(data$TARGET, p = 0.7, list = FALSE)
+train <- data[train_index, ]
+test <- data[-train_index, ]
+
+formula <- TARGET ~ .
+
+# Train the SVM model
+svm_model <- svm(formula = formula, data = train, kernel = "linear", cost = 10, gamma = 0.1)
+
+# Make predictions on the test set
+predictions <- predict(svm_model, newdata = test)
+```
+
+#SVM
+```{r}
+set.seed(100)
+
+# Split the data into training and testing sets
+train_idx <- createDataPartition(data$TARGET, p = 0.7, list = FALSE)
+train <- data[train_idx, ]
+test <- data[-train_idx, ]
+
+# Train
+svm_rbf <- train(TARGET ~ AMT_INCOME_TOTAL + AMT_CREDIT + AMT_ANNUITY + AMT_GOODS_PRICE + REGION_POPULATION_RELATIVE + AGE, data = train, method = 'svmRadial', prob.model = TRUE)
+svm_rbf
+
+# Test model on test set
+test_pred <- predict(svm_rbf, newdata = testing)
+confusionMatrix(test_pred, as.factor(test$TARGET), mode = 'everything')
+
+# check counts of each class
+testing %>% group_by(TARGET) %>% count()
+
+# get ROC curve
+# get probability for 'yes' and 'no' for each data point
+test_pred_prob <- predict(svm_rbf, newdata = test, type = 'prob')
+
+# get area under curve (auc)
+svm_rbf_roc <- roc(testing$card, test_pred_prob$YES)
+
+# get ROC curve
+svm_rbf_roc
+
+plot(svm_rbf_roc)
+```
+
+
+```{r}
+# set.seed(100)
+# 
+# train <- createDataPartition(y = data$TARGET, p=0.7, list = FALSE)
+# training <- data[TARGET,]
+# testing <- data[-TARGET,]
+# 
+# # Train model (use 'rf' for random forest)
+# rf <- train(TARGET~ CNT_CHILDREN+AMT_INCOME_TOTAL+AMT_CREDIT+AMT_ANNUITY+AMT_GOODS_PRICE+REGION_POPULATION_RELATIVE+AGE+DAYS_REGISTRATION+DAYS_ID_PUBLISH + FLAG_MOBIL+ CNT_FAM_MEMBERS +  REGION_RATING_CLIENT+ HOUR_APPR_PROCESS_START+ REGION_RATING_CLIENT_W_CITY+ INCOME_CREDIT_PERC +INCOME_PER_PERSON +ANNUITY_INCOME_PERC+LOAN_INCOME_RATIO+ANNUITY_LENGTH+CHILDREN_RATIO+ CREDIT_TO_GOODS_RATIO+ INC_PER_CHLD, data = training, method = 'rf', ntree = 100, maxdepth = 10, parms = list(split = 'information'))
+# 
+# rf
+# 
+# # Predict for test set
+# test_pred <- predict(rf, newdata = testing)
+# confusionMatrix(test_pred, as.factor(testing$card), mode = 'everything')
+# 
+# # check counts of each class
+# testing %>% group_by(card) %>% count()
+# 
+# # get ROC curve
+# # get probability for 'yes' and 'no' for each data point
+# test_pred_prob <- predict(rf, newdata = testing, type = 'prob')
+# 
+# rf_roc <- roc(testing$card, test_pred_prob$yes)
+# 
+# # get area under curve (auc)
+# rf_roc
+# 
+# # get ROC curve
+# plot(rf_roc)
+```
+
+
